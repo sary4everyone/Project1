@@ -1,0 +1,383 @@
+---
+title: "R_and_Python"
+author: "Sarthak"
+date: "01/23/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd("C:/Users/Admin/Desktop/Project1")
+#.libPaths('C:/Users/Admin/Documents/R/win-library/4.1')
+
+library(reticulate)
+use_python("C:/Users/Admin/Anaconda3/python.exe")
+#use_python("C:/Users/Admin/AppData/Local/Programs/Python/Python36/python.exe")
+```
+
+## Loading
+
+```{r}
+library(janitor)
+library(pacman)
+library(tidyverse)
+library(listenv)
+library(magrittr)
+
+LoadToEnvironment <- function(RData, env= new.env()){
+  load(RData, env)
+  return(env)
+}
+```
+
+```{python, include = FALSE}
+import os
+import sys
+import numpy as np
+import pandas as pd
+
+#import matplotlib
+#matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+
+import seaborn as sns
+import statsmodels.api as sm
+
+import gc
+```
+
+## Diamonds
+
+```{r}
+#read.table("clipboard",header=TRUE,sep="\t")
+df_diamonds = ggplot2::diamonds %>% clean_names()
+
+#str(df_diamonds)
+dim(df_diamonds)
+
+summary(df_diamonds)
+
+
+na_counts = sapply(X=1:ncol(df_diamonds),FUN=function(X){df_diamonds[,X] %>% is.na %>%  sum },simplify=T)
+names(na_counts) = colnames(df_diamonds)
+na_counts
+```
+
+```{r}
+df_diamonds %<>% mutate('centroid' = (x + y + z)/3)
+
+df_diamonds2 = df_diamonds %>% filter(x > 0,y > 0,z > 0)
+
+df_diamonds3 = df_diamonds2 %>%  select(color, cut, clarity, carat, price) %>% 
+   filter(clarity %in% c("SI1", "SI2", "VS1", "VS2", "VVS1", "VVS2")) %>% 
+   group_by(color,cut, clarity) %>% 
+   summarise(
+     'size' = n(),
+     'median_carat' = median(carat),
+     'median_price'= median(price)
+   ) %>% as.data.frame()
+
+df_diamonds4 = df_diamonds3 %>% arrange(desc(median_price),median_carat)
+
+```
+
+```{python}
+#pd.read_clipboard()
+df_diamonds_py = sns.load_dataset('diamonds')
+
+df_diamonds_py.shape
+
+type(df_diamonds_py)
+df_diamonds_py.info()
+
+df_diamonds_py.describe()
+
+df_diamonds_py.isna().sum()
+df_diamonds_py.isnull().any()
+
+#df_diamonds_py = df_diamonds_py.dropna()  
+```
+
+```{python}
+df_diamonds_py[['cut','color','clarity']] = df_diamonds_py[['cut','color','clarity']].astype(str)
+
+df_diamonds_py = df_diamonds_py.assign(centroid = lambda x: (df_diamonds_py.x +df_diamonds_py.y +df_diamonds_py.z)/3)
+
+df_diamonds_py2 = df_diamonds_py.query('x > 0 and y > 0 and z > 0')
+
+df_diamonds_py3 = (df_diamonds_py2
+  .filter(['color', 'cut', 'clarity', 'carat', 'price'])
+  .query('clarity in ["SI1", "SI2", "VS1", "VS2", "VVS1", "VVS2"]')
+  .groupby(['color','cut', 'clarity'])
+  .agg({
+     'carat': ['median'],
+     'price': ['median', 'size']
+    })
+)
+df_diamonds_py3.reset_index(inplace=True)
+df_diamonds_py3.columns = [x if y == '' else '_'.join([x,y]) for x,y in df_diamonds_py3.columns.values]
+df_diamonds_py3.rename(columns={'price_size':'size'},inplace=True)
+
+df_diamonds_py4 = df_diamonds_py3.sort_values(['price_median','carat_median'],ascending=[False,True])
+```
+
+```{python}
+plt.figure()
+df_diamonds_py4.hist(bins=50)
+plt.show()
+
+plt.figure()
+sns.heatmap(df_diamonds_py4.corr(), annot=True, cmap='coolwarm')
+plt.yticks(rotation=0)
+plt.show()
+
+plt.figure()
+plt.scatter(df_diamonds_py4['carat_median'], df_diamonds_py4['price_median'])
+plt.show()
+
+corr_mat = df_diamonds_py4.corr()
+plt.figure()
+corr_mat['price_median'].drop('price_median').sort_values(ascending = False).plot(kind = 'bar')
+plt.xticks(rotation=0)
+plt.show()
+```
+
+## Table3
+
+```{r}
+data("table3")
+df_table3 = tidyr::table3
+
+df_table3 %<>% separate(col = 'rate',sep='/', into = c('cases','population'))
+
+#Wider (spread)
+df_table4 = df_table3 %>% pivot_wider(id_cols = year,names_from = country, values_from = c(cases,population))
+
+#Longer (gather)
+df_table5_p1 = df_table4 %>% select(year,cases_Afghanistan:cases_China) %>% 
+  pivot_longer(cases_Afghanistan:cases_China,names_to = 'country', values_to = 'cases') %>%
+  separate(col='country', sep='_', into = c('dummy','country')) %>% select(-dummy)
+
+df_table5_p2 = df_table4 %>% select(year,population_Afghanistan:population_China) %>% 
+  pivot_longer(population_Afghanistan:population_China,names_to = 'country2', values_to = 'population') %>% 
+  separate(col='country2', sep='_', into = c('dummy','country2')) %>% select(-dummy)
+
+#Merging
+df_table5 = inner_join(df_table5_p1, df_table5_p2, by = c('year','country'='country2'))
+
+```
+
+```{python}
+df_table3_py = r.df_table3
+df_table3_py[['cases', 'population']] = df_table3_py[['cases', 'population']].astype(int)
+
+#Wider 
+df_table4_py = (df_table3_py
+  .pivot_table(index=['year'], columns=['country'], values=['cases','population'])
+  .reset_index()
+)
+df_table4_py.columns = [x if y=='' else x+'_'+y for x, y in df_table4_py.columns ] 
+
+#Longer 
+df_table5_py_p1 = (df_table4_py
+  .filter(['year']+[col for col in df_table4_py if col.startswith('c')]) 
+  .melt(id_vars = 'year', value_vars = [col for col in df_table4_py if col.startswith('c')], var_name = 'country', value_name='cases')
+)
+df_table5_py_p1[['dummy','country']] = df_table5_py_p1.country.str.split(pat = '_', expand = True)
+df_table5_py_p1.drop('dummy', axis=1,inplace=True)
+
+df_table5_py_p2 = (df_table4_py
+  .filter(['year']+[col for col in df_table4_py if col.startswith('p')]) 
+  .melt(id_vars = 'year', value_vars = [col for col in df_table4_py if col.startswith('p')], var_name = 'country', value_name='population')
+)
+df_table5_py_p2[['dummy','country2']] = df_table5_py_p2.country.str.split(pat = '_', expand = True)
+df_table5_py_p2.drop(['dummy','country'], axis=1,inplace=True)
+
+#Merging (join)
+df_table5_py = df_table5_py_p1.merge(df_table5_py_p2,left_on=['year','country'], right_on=['year','country2'], how="inner").drop('country2',axis=1)
+```
+
+## Iris
+
+```{r}
+df_iris = datasets::iris %>%  clean_names()
+df_iris %>% visdat::vis_dat()
+df_iris %>%  visdat::vis_miss()
+
+library(tidymodels)
+split = initial_split(df_iris, strata = 'species',prop = 0.7)
+
+### Split into train, test and cross-validation sets
+set.seed(123)
+df_train = training(split)
+df_test = testing(split)
+cv_folds = vfold_cv(df_train, v = 3)
+
+df_rec = recipe(species ~ ., data = df_train) %>% 
+  step_center(-species) %>% 
+  step_scale(-species)
+
+knn_spec = nearest_neighbor(neighbors = 3) %>% 
+  set_engine('kknn') %>%  
+  set_mode('classification')
+
+knn_wfw = workflow() %>% 
+  add_recipe(df_rec) %>% 
+  add_model(knn_spec)
+```
+
+```{r}
+df_juiced = df_rec %>% prep %>% juice 
+df_train_fit = knn_spec %>%  fit(species~., data = df_juiced)
+
+df_train_out = df_train_fit %>% predict(df_juiced) %>% bind_cols(df_juiced)
+table(df_train_out$species,df_train_out$.pred_class)
+rbind(
+  df_train_out %>% accuracy(truth='species', estimate = .pred_class),
+  df_train_out %>% sensitivity(truth='species', estimate = .pred_class),
+  df_train_out %>% kap(truth='species', estimate = .pred_class)
+)
+#df_train_out %>% conf_mat(truth='species', estimate = .pred_class)
+
+###Train Set Resample evaluations
+df_train_res_fit = knn_wfw %>% fit_resamples(
+  resamples = cv_folds,
+  metrics = metric_set(recall, precision, sens, spec, accuracy, kap),
+  control = control_resamples(save_pred = T)
+)
+df_train_res_fit %>%  collect_metrics()
+
+```
+
+```{r}
+###Test Set evaluation
+df_test_out = knn_wfw %>% #provide workflow of best model
+last_fit(
+  split= split,
+  metrics = metric_set(recall, precision, sens, spec, accuracy, kap)
+)
+df_test_out %>% collect_metrics()
+table(df_test_out$.predictions[[1]]$.pred_class,df_test$species)
+
+#OR#
+
+df_baked = df_rec %>% prep %>% bake(new_data = df_test)
+df_test_out = knn_spec %>% fit(species~., data = df_juiced) %>% 
+  predict(df_baked) %>% bind_cols(df_baked) #provide fit of best model
+rbind(
+  df_test_out %>% accuracy(truth='species', estimate = .pred_class),
+  df_test_out %>% kap(truth='species', estimate = .pred_class),
+  df_test_out %>% sensitivity(truth='species', estimate = .pred_class),
+  df_test_out %>% specificity(truth='species', estimate = .pred_class)
+)
+df_test_out %>% conf_mat(truth='species', estimate = .pred_class)
+
+# metrics_select <-function(X){list(
+#    acc = accuracy(X, truth='species', estimate = .pred_class)$.estimate,
+#    sens= sensitivity(X, truth='species', estimate = .pred_class)$.estimate,
+#    kappa = kap(X,truth='species', estimate = .pred_class)$.estimate,
+#    spec = specificity(X,truth='species', estimate = .pred_class)$.estimate
+# )}
+# purrr::map(
+#   list(df_test_out),
+#   ~metrics_select(.)
+# ) %>%  unlist()
+
+
+```
+
+```{python}
+df_iris_py = r.df_iris
+df_iris_py['species_num'] = df_iris_py.species.map({'setosa':1,'versicolor':2,'virginica':3}).astype('int')
+#df_iris_py['species_num'] = [1 if x=='a' else 2 if x=='b' else 3 for x in df_iris_py.species.unique()]
+
+# fig, (ax1, ax2, ax3) = plt.subplots(3,1)
+# ax1.scatter(df_iris_py['sepal_length'],df_iris_py['petal_length'],c=df_iris_py['species_num'])
+# ax2.scatter(df_iris_py['sepal_length'],df_iris_py['sepal_width'],c=df_iris_py['species_num'])
+# ax3.scatter(df_iris_py['sepal_length'],df_iris_py['petal_width'],c=df_iris_py['species_num'])
+# fig.show()
+
+for i in range(0,3):
+  for j in range(i+1,4):
+    plt.figure()
+    plt.scatter(df_iris_py[df_iris_py.columns[i]],df_iris_py[df_iris_py.columns[j]],c=df_iris_py['species_num'])
+    plt.title(label='{} vs {}'.format(df_iris_py.columns[i],df_iris_py.columns[j]))
+    plt.show()
+
+#plt.close("all")
+```
+
+```{python}
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import confusion_matrix,accuracy_score 
+from sklearn.model_selection import cross_val_score
+
+y = df_iris_py.species
+X = df_iris_py.drop(['species','species_num'],axis=1)
+
+X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.2,random_state=0)
+
+X_train = StandardScaler(with_mean=True, with_std= True).fit(X_train).transform(X_train)
+X_test = StandardScaler(with_mean=True, with_std= True).fit(X_train).transform(X_test)
+
+classifier = KNeighborsClassifier(n_neighbors = 3) 
+
+classifier.fit(X_train, y_train)
+y_train_pred = classifier.predict(X_train)
+cm = confusion_matrix(y_train, y_train_pred)
+accuracy = accuracy_score(y_train, y_train_pred)
+cm
+accuracy
+```
+
+```{python}
+y_test_pred = classifier.predict(X_test)
+cm = confusion_matrix(y_test, y_test_pred)
+accuracy = accuracy_score(y_test, y_test_pred)
+cm
+accuracy
+```
+
+## Storing package list
+
+```{r}
+pkg_list = sapply(
+  X=1:length((.packages())),
+  FUN = function(X){packageVersion((.packages()[X])) %>% as.character()},
+  simplify = T
+)
+names(pkg_list) = (.packages())
+pkg_list
+
+#rm(list=ls())
+gc()
+```
+
+```{python}
+#!pip freeze
+
+# for element in dir():
+#     if element == "r":
+#         pass
+#     if element[0:2] != "__":
+#         del globals()[element]
+
+gc.collect()
+plt.close("all")
+
+```
+
+## End
+
+```{r}
+#LAST2
+```
+
+```{r}
+#LAST
+```

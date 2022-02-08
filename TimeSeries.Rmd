@@ -1,0 +1,138 @@
+---
+title: "Time Series"
+author: "Sarthak"
+date: "2/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd("C:/Users/Admin/Desktop/Project1")
+#.libPaths('C:/Users/Admin/Documents/R/win-library/4.1')
+
+library(reticulate)
+use_python("C:/Users/Admin/Anaconda3/python.exe")
+#use_python("C:/Users/Admin/AppData/Local/Programs/Python/Python36/python.exe")
+```
+
+## R Markdown
+
+```{r, include=F}
+library(janitor)
+library(pacman)
+library(tidyverse)
+library(listenv)
+library(magrittr)
+```
+
+```{python, include=F}
+import os
+import sys
+import numpy as np
+import pandas as pd
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import statsmodels.api as sm
+
+import gc
+from statsmodels.tsa.stattools import adfuller, kpss
+from arch.unitroot import ADF, PhillipsPerron, ZivotAndrews, KPSS, engle_granger
+from statsmodels.tsa.vector_ar.vecm import coint_johansen
+
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from pmdarima.arima.utils import ndiffs
+```
+
+## Time Series Model
+
+```{r}
+df_eustocks = datasets::EuStockMarkets %>% as.data.frame %>% clean_names()
+df_eustocks_returns = apply(df_eustocks,2,diff) %>%  data.frame()
+
+forecast::ggtsdisplay(df_eustocks_returns$smi,lag.max=30)
+
+#Stationarity Tests
+stationarity_tests <- function(ts,lag){
+  data.frame(
+    'test_name' = c('ADF', 'Phillips-Perron', 'KPSS'),
+    'lag' = c(
+      aTSA::adf.test(ts,nlag = lag+1,output = F)[[1]][lag+1,1],
+      aTSA::pp.test(ts,lag.short = T,output = F)[1,1],
+      aTSA::kpss.test(ts,lag.short = T,output = F)[1,1]
+    ),
+    'stat' = c(
+      aTSA::adf.test(ts,nlag = lag+1,output = F)[[1]][lag+1,2],
+      aTSA::pp.test(ts,lag.short = T,output = F)[1,2],
+      aTSA::kpss.test(ts,lag.short = T,output = F)[1,2]
+    ),
+    'p_value' = c(
+      aTSA::adf.test(ts,nlag = lag+1,output = F)[[1]][lag+1,3],
+      aTSA::pp.test(ts,lag.short = T,output = F)[1,3],
+      aTSA::kpss.test(ts,lag.short = T,output = F)[1,3]
+    ),
+    'Null Hypo' = c('Unit Root is present', 'Unit Root is present', 'Stationary')
+  )}
+stationarity_tests(df_eustocks_returns$smi,4)
+
+#Cointegration Tests
+aTSA::coint.test(df_eustocks$smi,df_eustocks$ftse,d=0,output=F)[1,]
+
+#Johansen Test: H0 = cointegrated
+urca::ca.jo(df_eustocks,type='trace',K=2,ecdet = 'none', spec='longrun')@cval %>% as.data.frame %>%  
+  mutate('stat'= c(urca::ca.jo(df_eustocks,type='trace',K=2,ecdet = 'none', spec='longrun')@teststat) %>%  round(2))
+urca::ca.jo(df_eustocks,type='trace',K=2,ecdet = 'none', spec='longrun')@lambda
+urca::ca.jo(df_eustocks,type='trace',K=2,ecdet = 'none', spec='longrun')@V
+urca::ca.jo(df_eustocks,type='trace',K=2,ecdet = 'none', spec='longrun')@W
+#This says we need at least 2 variables for stationarity
+```
+
+```{python}
+df_eustocks = r.df_eustocks
+df_eustocks_returns = r.df_eustocks_returns
+
+_ = plt.figure()
+_ = df_eustocks_returns['smi'].plot(kind="line")
+plt.show()
+
+_ = plt.figure()
+_ = plot_acf(df_eustocks_returns['smi'])
+plt.show()
+
+_ = plt.figure()
+_ = plot_pacf(df_eustocks_returns['smi'],method='ols')
+plt.show()
+
+
+#Stationarity Tests
+def stationarity_tests(ts,lag):
+  tests = ['ADF', 'Phillips-Perron', 'KPSS']
+  name = ['statistic', 'p-value', 'Null Hypo']
+  adf_test = [np.round(ADF(ts,lags=lag,trend="c").stat,2), np.round(ADF(ts,lags=lag,trend="c").pvalue,4), ADF(ts,lags=lag,trend="c").null_hypothesis]
+  pp_test = [np.round(PhillipsPerron(ts,lags=lag,trend="c").stat,2), np.round(PhillipsPerron(ts,lags=lag,trend="c").pvalue,4), PhillipsPerron(ts,lags=lag,trend="c").null_hypothesis]
+  kpss_test = [np.round(KPSS(ts,lags=lag,trend="c").stat,2), np.round(KPSS(ts,lags=lag,trend="c").pvalue,4), KPSS(ts,lags=lag,trend="c").null_hypothesis]
+  return(pd.DataFrame(
+    [adf_test,
+     pp_test,
+     kpss_test], columns=name,index=tests))
+     
+stationarity_tests(df_eustocks_returns['smi'],lag=4)
+
+#Cointegration Tests
+pd.DataFrame(
+    [['smi','ftse',np.round(engle_granger(df_eustocks['smi'],df_eustocks['ftse'],lags=3).stat,2), np.round(engle_granger(df_eustocks['smi'],df_eustocks['ftse'],lags=3).pvalue,4), engle_granger(df_eustocks['smi'],df_eustocks['ftse'],lags=3).null_hypothesis]], 
+    columns=['col1','col2','statistic', 'p-value', 'Null Hypo'],index=['Engle-Granger'])
+    
+
+#Johansen Trace, H0: cointegrated
+pd.DataFrame(
+  np.hstack([coint_johansen(df_eustocks,0,1).trace_stat_crit_vals, coint_johansen(df_eustocks,0,1).trace_stat.reshape(4,1)]),
+  columns = ['c0.10','c0.05','c0.01','stat']
+)
+coint_johansen(df_eustocks,0,1).eig
+np.round(coint_johansen(df_eustocks,0,1).evec,4)
+
+```
+
+
